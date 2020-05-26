@@ -34,7 +34,7 @@ module fv_regional_mod
    use mpp_mod,           only: FATAL, input_nml_file,                  &
                                 mpp_error ,mpp_pe, mpp_sync,            &
                                 mpp_npes, mpp_root_pe, mpp_gather,      &
-                                mpp_get_current_pelist, NULL_PE
+                                mpp_get_current_pelist, NOTE, NULL_PE
    use mpp_io_mod
    use tracer_manager_mod,only: get_tracer_index,get_tracer_names
    use field_manager_mod, only: MODEL_ATMOS
@@ -106,29 +106,27 @@ module fv_regional_mod
 !     integer, parameter :: iend_nest = 1346
 !     integer, parameter :: jend_nest = 1290
 
-      integer,parameter :: nvars_core=7                                    !<-- # of prognostic variables in restart file
+      integer,parameter :: nvars_core=7                                &   !<-- # of prognostic variables in restart file
+                          ,nvars_tracers=8                                 !<-- # of prognostic variables in restart file
 
       real,parameter :: blend_exp1=0.5,blend_exp2=10.                      !<-- Define the exponential dropoff of weights
                                                                            !    for prescribed external values in the
                                                                            !    blending rows inside the domain boundary.
       real :: current_time_in_seconds
 !
-      integer,save :: isd_mod,ied_mod,jsd_mod,jed_mod
-!
-      integer,save :: ncid,next_time_to_read_bcs,nfields_tracers       &
-                     ,npz,ntracers
+      integer,save :: ncid,next_time_to_read_bcs,npz,ntracers
 !
       integer,save :: k_split,n_split
 !
       integer,save :: bc_hour, ntimesteps_per_bc_update
 !
       integer,save :: cld_amt_index                                    &   !<--
-                     ,graupel_index                                    &   !<--
-                     ,ice_water_index                                  &   !<--  Locations of
-                     ,liq_water_index                                  &   !<--  tracer variables
-                     ,o3mr_index                                       &   !<--  in the tracer
-                     ,rain_water_index                                 &   !<--  array.
-                     ,snow_water_index                                 &   !<--
+                     ,graupel_index                                    &   !
+                     ,ice_water_index                                  &   !    Locations of 
+                     ,liq_water_index                                  &   !    tracer vbls 
+                     ,o3mr_index                                       &   !    in the tracers
+                     ,rain_water_index                                 &   !    array.
+                     ,snow_water_index                                 &   !
                      ,sphum_index                                          !<--
 !
       integer,save :: lbnd_x_tracers,lbnd_y_tracers                    &   !<-- Local lower bounds of x,y for tracer arrays
@@ -148,8 +146,6 @@ module fv_regional_mod
 
       logical,save :: north_bc,south_bc,east_bc,west_bc                &
                      ,begin_regional_restart=.true.
-
-      logical,dimension(:),allocatable,save :: blend_this_tracer
 
       character(len=50) :: filename_core='INPUT/fv_core.res.temp.nc'
       character(len=50) :: filename_core_new='RESTART/fv_core.res.tile1_new.nc'
@@ -317,12 +313,7 @@ contains
       east_bc =.false.
       west_bc =.false.
 !
-!     write(0,*)' enter setup_regional_BC isd=',isd,' ied=',ied,' jsd=',jsd,' jed=',jed    
-      isd_mod=isd
-      ied_mod=ied
-      jsd_mod=jsd
-      jed_mod=jed
-!
+!  write(0,*)' enter setup_regional_BC isd=',isd,' ied=',ied,' jsd=',jsd,' jed=',jed    
 !-----------------------------------------------------------------------
 !***  Which side(s) of the domain does this task lie on if any?
 !-----------------------------------------------------------------------
@@ -406,10 +397,20 @@ contains
 !***  Compute the index limits within the boundary region on each
 !***  side of the domain for both scalars and winds.  Since the
 !***  domain does not move then the computations need to be done
-!***  only once. 
+!***  only once.  Likewise find and save the locations of the
+!***  available tracers in the tracers array.
 !-----------------------------------------------------------------------
 !
       call compute_regional_bc_indices(Atm%regional_bc_bounds)
+!
+      sphum_index     =get_tracer_index(MODEL_ATMOS, 'sphum')
+      liq_water_index =get_tracer_index(MODEL_ATMOS, 'liq_wat')
+      ice_water_index =get_tracer_index(MODEL_ATMOS, 'ice_wat')
+      rain_water_index=get_tracer_index(MODEL_ATMOS, 'rainwat')
+      snow_water_index=get_tracer_index(MODEL_ATMOS, 'snowwat')
+      graupel_index   =get_tracer_index(MODEL_ATMOS, 'graupel')
+      cld_amt_index   =get_tracer_index(MODEL_ATMOS, 'cld_amt')
+      o3mr_index      =get_tracer_index(MODEL_ATMOS, 'o3mr')
 !
 !-----------------------------------------------------------------------
 !
@@ -419,8 +420,7 @@ contains
 !
 !-----------------------------------------------------------------------
 !
-!     ntracers=Atm%ncnst - Atm%flagstruct%dnats                            !<-- # of advected tracers
-      ntracers=Atm%ncnst                                                   !<-- Total # of tracers
+      ntracers=Atm%ncnst - Atm%flagstruct%dnats                            !<-- # of advected tracers
       npz=Atm%npz                                                          !<-- # of layers in vertical configuration of integration
       klev_out=npz
 !
@@ -712,24 +712,6 @@ contains
         enddo
         enddo
       endif
-!
-      sphum_index      = get_tracer_index(MODEL_ATMOS, 'sphum')
-      liq_water_index  = get_tracer_index(MODEL_ATMOS, 'liq_wat')
-      ice_water_index  = get_tracer_index(MODEL_ATMOS, 'ice_wat')
-      rain_water_index = get_tracer_index(MODEL_ATMOS, 'rainwat')
-      snow_water_index = get_tracer_index(MODEL_ATMOS, 'snowwat')
-      graupel_index    = get_tracer_index(MODEL_ATMOS, 'graupel')
-      cld_amt_index    = get_tracer_index(MODEL_ATMOS, 'cld_amt')
-      o3mr_index       = get_tracer_index(MODEL_ATMOS, 'o3mr')
-!  write(0,*)' setup_regional_bc'
-!  write(0,*)' sphum_index=',sphum_index
-!  write(0,*)' liq_water_index=',liq_water_index
-!  write(0,*)' ice_water_index=',ice_water_index
-!  write(0,*)' rain_water_index=',rain_water_index
-!  write(0,*)' snow_water_index=',snow_water_index
-!  write(0,*)' graupel_index=',graupel_index
-!  write(0,*)' cld_amt_index=',cld_amt_index
-!  write(0,*)' o3mr_index=',o3mr_index
 !
 !-----------------------------------------------------------------------
 !***  When nudging of specific humidity is selected then we need a 
@@ -1053,7 +1035,8 @@ contains
 !
       call check(nf90_open(filename,nf90_nowrite,ncid_grid))               !<-- Open the grid data netcdf file; get the file ID.
 !
-!     write(0,*)' opened grid file ',trim(filename)
+      call  mpp_error(NOTE,' opened grid file '//trim(filename))
+!
 !-----------------------------------------------------------------------
 !***  The longitude and latitude are on the super grid.  We need only
 !***  the points on each corner of the grid cells which is every other
@@ -1063,6 +1046,8 @@ contains
       i_start_data=2*(isd+nhalo_model)-1
       j_start_data=2*(jsd+nhalo_model)-1
 !
+!     write(0,11110)i_start_data,j_start_data
+11110 format(' i_start_data=',i5,' j_start_data=',i5)
 !---------------
 !***  Longitude
 !---------------
@@ -1242,7 +1227,7 @@ contains
                            ,isd, ied, jsd, jed                          &
                            ,ak, bk )
       call regional_bc_t1_to_t0(BC_t1, BC_t0                            &  !
-                               ,Atm%npz                                 &  !<-- Move BC t1 data to t0
+                               ,Atm%npz                                 &  !<-- Move BC t1 data
                                ,ntracers                                &
                                ,Atm%regional_bc_bounds )                   !
 !
@@ -1276,9 +1261,9 @@ contains
 !***  its dimensions and variables.
 !-----------------------------------------------------------------------
 !
-!     if(Atm%flagstruct%write_restart_with_bcs)then
-!       call create_restart_with_bcs(Atm)
-!     endif
+      if(Atm%flagstruct%write_restart_with_bcs)then
+        call create_restart_with_bcs(Atm)
+      endif
 !
 !-----------------------------------------------------------------------
 !
@@ -1389,9 +1374,9 @@ contains
 !***  its dimensions and variables.
 !-----------------------------------------------------------------------
 !
-!     if(Atm%flagstruct%write_restart_with_bcs)then
-!       call create_restart_with_bcs(Atm)
-!     endif
+      if(Atm%flagstruct%write_restart_with_bcs)then
+        call create_restart_with_bcs(Atm)
+      endif
 !
 !-----------------------------------------------------------------------
 !
@@ -1792,8 +1777,6 @@ contains
       do nt = 1, ntracers 
         call get_tracer_names(MODEL_ATMOS, nt, var_name_root)
         index= get_tracer_index(MODEL_ATMOS,trim(var_name_root))
-!  write(0,*)' regional_bc_data before read_regional_bc_file'
-!  write(0,*)' nt=',nt,' var_name_root=',trim(var_name_root),' index=',index
         if (index==liq_water_index .or. index==sphum_index) then
           required = .true.
         else
@@ -2188,7 +2171,8 @@ contains
 !***  FV3's modified virtual potential temperature.
 !-----------------------------------------------------------------------
 !
-      call convert_to_virt_pot_temp(isd,ied,jsd,jed,npz)
+      call convert_to_virt_pot_temp(isd,ied,jsd,jed,npz                 &
+                                   ,sphum_index,liq_water_index )
 !
 !-----------------------------------------------------------------------
 !***  If nudging of the specific humidity has been selected then
@@ -2761,8 +2745,7 @@ contains
 !
       integer,intent(in) :: i1,i2,j1,j2
 !
-      real,dimension(i1:i2,j1:j2,1:npz),intent(in) :: temp,liq_wat,sphum
-      real,dimension(i1:i2,j1:j2,1:npz),intent(inout) :: cappa
+      real,dimension(i1:i2,j1:j2,1:npz) :: cappa,temp,liq_wat,sphum
 !
 !----------------------
 !***  Output variables
@@ -2799,7 +2782,7 @@ contains
           ql=qd-qs
           qv=max(0.,sphum(i,j,k))
           cvm=(1.-(qv+qd))*cv_air + qv*cv_vap + ql*c_liq + qs*c_ice
-!
+ !
           cappa(i,j,k)=rdgas/(rdgas+cvm/(1.+zvir*sphum(i,j,k)))
 !
         enddo
@@ -3059,16 +3042,13 @@ contains
 !
         if(call_get_var)then
           if (present(array_4d)) then   !<-- 4-D variable
-            status=nf90_inq_varid(ncid,trim(var_name),var_id)                !<-- Get this variable's ID.
+            status=nf90_inq_varid(ncid,trim(var_name),var_id)                         !<-- Get this variable's ID.
             if (required_local) then
               call check(status)
             endif
             if (status /= nf90_noerr) then
               if (east_bc) write(0,*)' WARNING: Tracer ',trim(var_name),' not in input file'
               array_4d(:,:,:,tlev)=0.                                        !<-- Tracer not in input so set to zero in boundary.
-!    
-              blend_this_tracer(tlev)=.false.                                !<-- Tracer not in input so do not apply blending.
-!    
             else
               call check(nf90_get_var(ncid,var_id                                         &
                                      ,array_4d(i_start_array:i_end_array                  &  !<-- Fill this task's domain boundary halo.
@@ -3107,6 +3087,7 @@ contains
       if(status /= nf90_noerr) then
         call mpp_error(FATAL,' NetCDF error '//trim(nf90_strerror(status)))
       endif
+!
       end subroutine check
 !
 !-----------------------------------------------------------------------
@@ -3155,11 +3136,6 @@ contains
       allocate(BC_side%divgd_BC(is_0:ie_0,js_0:je_0,klev)) ; BC_side%divgd_BC=real_snan
 !
       allocate(BC_side%q_BC    (is_0:ie_0,js_0:je_0,1:klev,1:ntracers)) ; BC_side%q_BC=real_snan
-!
-      if(.not.allocated(blend_this_tracer))then
-        allocate(blend_this_tracer(1:ntracers))
-        blend_this_tracer=.true.                                        !<-- Start with blending all tracers.
-      endif
 !
 #ifndef SW_DYNAMICS
       allocate(BC_side%pt_BC   (is_0:ie_0,js_0:je_0,klev)) ; BC_side%pt_BC=real_snan
@@ -3245,22 +3221,23 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
 !
 !---------------------------------------------------------------------------------
 !
-  sphum   = sphum_index
-  liq_wat = liq_water_index
-  ice_wat = ice_water_index
-  rainwat = rain_water_index
-  snowwat = snow_water_index
-  graupel = graupel_index
-  cld_amt = cld_amt_index
-  o3mr    = o3mr_index
+  sphum   = get_tracer_index(MODEL_ATMOS, 'sphum')
+  liq_wat = get_tracer_index(MODEL_ATMOS, 'liq_wat')
+  ice_wat = get_tracer_index(MODEL_ATMOS, 'ice_wat')
+  rainwat = get_tracer_index(MODEL_ATMOS, 'rainwat')
+  snowwat = get_tracer_index(MODEL_ATMOS, 'snowwat')
+  graupel = get_tracer_index(MODEL_ATMOS, 'graupel')
+  cld_amt = get_tracer_index(MODEL_ATMOS, 'cld_amt')
+  o3mr    = get_tracer_index(MODEL_ATMOS, 'o3mr')
+
   k2 = max(10, km/2)
 
-! if (mpp_pe()==1) then
-!   print *, 'sphum = ', sphum
-!   print *, 'clwmr = ', liq_wat
-!   print *, ' o3mr = ', o3mr
-!   print *, 'ncnst = ', ncnst
-! endif
+  if (mpp_pe()==1) then
+    print *, 'sphum = ', sphum
+    print *, 'clwmr = ', liq_wat
+    print *, ' o3mr = ', o3mr
+    print *, 'ncnst = ', ncnst
+  endif
 
   if ( sphum/=1 ) then
        call mpp_error(FATAL,'SPHUM must be 1st tracer')
@@ -3415,7 +3392,7 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
              BC_side%q_BC(i,j,k,iq) = qn1(i,k)
            enddo
          enddo
-       endif
+       endif ! skip cld_amt in the remap since it is not included in the input
       enddo
 
 !---------------------------------------------------
@@ -4083,7 +4060,7 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
 !
       real,dimension(:,:,:),pointer :: bc_t0,bc_t1                       !<-- Boundary data at the two bracketing times.
 !
-      logical :: blend,call_interp
+      logical :: call_interp
 !
 !---------------------------------------------------------------------
 !*********************************************************************
@@ -4093,11 +4070,9 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
         return
       endif
 !
-      blend=.true.
       iq=0
       if(present(index4))then
         iq=index4
-        blend=blend_this_tracer(iq)
       endif
 !
 !---------------------------------------------------------------------
@@ -4299,7 +4274,7 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
                                     ,fcst_time                           &
                                     ,bc_update_interval                  &
                                     ,i1_blend,i2_blend,j1_blend,j2_blend &
-                                    ,i_bc,j_bc, nside, bc_vbl_name ,blend)
+                                    ,i_bc,j_bc, nside, bc_vbl_name )
         endif
 !
 !---------------------------------------------------------------------
@@ -4429,7 +4404,7 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
                                       ,fcst_time                           &
                                       ,bc_update_interval                  &
                                       ,i1_blend,i2_blend,j1_blend,j2_blend &
-				      ,i_bc,j_bc,nside, bc_vbl_name, blend )
+				      ,i_bc,j_bc,nside, bc_vbl_name )
 
 !---------------------------------------------------------------------
 !***  Update the boundary region of the input array at the given
@@ -4458,13 +4433,12 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
 !
       real,intent(in) :: fcst_time                                       !<-- Current forecast time (sec)
 !
+      real :: rdenom
 !
       real,dimension(lbnd1:ubnd1,lbnd2:ubnd2,1:ubnd_z) :: bc_t0        & !<-- Interpolate between these
                                                          ,bc_t1          !    two boundary region states.
 !
       character(len=*),intent(in) :: bc_vbl_name
-!
-      logical,intent(in) :: blend                                        !<-- Can blending be applied to this variable?
 !
 !---------------------
 !*** Output variables
@@ -4479,7 +4453,7 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
 !
       integer :: i,j,k
 !
-      real :: blend_value,factor_dist,fraction_interval,rdenom
+      real :: blend_value,factor_dist,fraction_interval
 !
 !---------------------------------------------------------------------
 !*********************************************************************
@@ -4503,15 +4477,6 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
         enddo
         enddo
       enddo
-!
-!---------------------------------------------------------------------
-!***  If this tracer is not in the external BC file then it will not
-!***  be blended.
-!---------------------------------------------------------------------
-!
-      if(.not.blend)then
-        return
-      endif
 !
 !---------------------------------------------------------------------
 !***  Use specified external data to blend with integration values
@@ -4813,7 +4778,8 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
 !+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 !---------------------------------------------------------------------
 !
-      subroutine convert_to_virt_pot_temp(isd,ied,jsd,jed,npz)
+      subroutine convert_to_virt_pot_temp(isd,ied,jsd,jed,npz           &
+                                         ,sphum,liq_wat )
 !
 !-----------------------------------------------------------------------
 !***  Convert the incoming sensible temperature to virtual potential
@@ -4827,6 +4793,8 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
 !---------------------
 !
       integer,intent(in) :: isd,ied,jsd,jed,npz
+!
+      integer,intent(in) :: liq_wat,sphum
 !
 !---------------------
 !***  Local variables
@@ -4956,11 +4924,11 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
 !
         do j=j1,j2
         do i=i1,i2
-          dp1 = zvir*q(i,j,k,sphum_index)
+          dp1 = zvir*q(i,j,k,sphum)
 #ifdef USE_COND
 #ifdef MOIST_CAPPA
-          cvm=(1.-q(i,j,k,sphum_index)+q_con(i,j,k))*cv_air             &
-             +q(i,j,k,sphum_index)*cv_vap+q(i,j,k,liq_water_index)*c_liq
+          cvm=(1.-q(i,j,k,sphum)+q_con(i,j,k))*cv_air                   &
+             +q(i,j,k,sphum)*cv_vap+q(i,j,k,liq_wat)*c_liq
           pkz=exp(cappa(i,j,k)*log(rdg*delp(i,j,k)*pt(i,j,k)            &
               *(1.+dp1)*(1.-q_con(i,j,k))/delz(i,j,k)))
 #else
@@ -5551,11 +5519,10 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
 !
       type(fv_atmos_type),target,intent(inout) :: Atm                      !<-- Atm object for the current domain
 !
-      integer :: dimid,index,istat,n,na,natts                           &
+      integer :: dimid,n,na,natts                                       &
                 ,ncid_core,ncid_core_new                                &
                 ,ncid_tracers,ncid_tracers_new                          &
-                ,nctype,ndims,ngatts,nkount,nn,nv_core,nv_tracers       &
-                ,var_id
+                ,nctype,ndims,ngatts,nn,nv_core,nv_tracers,var_id
 !
       integer,dimension(ndims_core) :: dim_lengths_core
       integer,dimension(ndims_tracers) :: dim_lengths_tracers
@@ -5623,41 +5590,39 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
       fields_core(7)%name='phis'
 !
 !-----------------------------------------------------------------------
-!***  We need to point at the tracers in the model's tracer array.
-!***  Those tracers depend on the physics that was selected so they 
-!***  cannot be pre-specified like the variables in the core restart
-!***  file were.
+!***  Also point at the proper tracer arrays and set their names.
 !-----------------------------------------------------------------------
 !
-      call check(nf90_open(filename_tracers,nf90_nowrite,ncid_tracers))    !<-- The tracer restart file's ID
+      allocate(fields_tracers(1:nvars_tracers))
 !
-      call check(nf90_inquire(ncid_tracers,nvariables=nv_tracers))         !<-- The TOTAL number of tracer restart file variables
+      lbnd_x_tracers=lbound(Atm%q,1)
+      ubnd_x_tracers=ubound(Atm%q,1)
+      lbnd_y_tracers=lbound(Atm%q,2)
+      ubnd_y_tracers=ubound(Atm%q,2)
 !
-      nfields_tracers=nv_tracers-ndims_tracers                             !<-- # of 3-D tracer fields
-      allocate(fields_tracers(1:nfields_tracers),stat=istat)
-      if(istat/=0)then
-        call mpp_error(FATAL,' Failed to allocate fields_tracers.')
-      else
-        if(is_master())then
-          write(0,33012)nfields_tracers
-33012     format(' Allocated fields_tracers(1:',i3,')')
-        endif
-      endif
-      nkount=0
+      fields_tracers(1)%ptr=>Atm%q(:,:,:,sphum_index)
+      fields_tracers(1)%name='sphum'
 !
-      do n=1,nv_tracers
-        var_id=n
-        call check(nf90_inquire_variable(ncid_tracers,var_id,var_name,nctype &  !<-- Name and type of this variable
-                  ,ndims,dimids,natts))                                         !<-- # of dimensions and attributes in this variable
+      fields_tracers(2)%ptr=>Atm%q(:,:,:,liq_water_index)
+      fields_tracers(2)%name='liq_wat'
 !
-        if(n>ndims_tracers)then
-          nkount=nkount+1
-          fields_tracers(nkount)%name=trim(var_name)
-          index=get_tracer_index(MODEL_ATMOS, trim(var_name))
-          fields_tracers(nkount)%ptr=>Atm%q(:,:,:, index)
-        endif
+      fields_tracers(3)%ptr=>Atm%q(:,:,:,ice_water_index)
+      fields_tracers(3)%name='ice_wat'
 !
-      enddo
+      fields_tracers(4)%ptr=>Atm%q(:,:,:,rain_water_index)
+      fields_tracers(4)%name='rainwat'
+!
+      fields_tracers(5)%ptr=>Atm%q(:,:,:,snow_water_index)
+      fields_tracers(5)%name='snowwat'
+!
+      fields_tracers(6)%ptr=>Atm%q(:,:,:,graupel_index)
+      fields_tracers(6)%name='graupel'
+!
+      fields_tracers(7)%ptr=>Atm%q(:,:,:,o3mr_index)
+      fields_tracers(7)%name='o3mr'
+!
+      fields_tracers(8)%ptr=>Atm%q(:,:,:,cld_amt_index)
+      fields_tracers(8)%name='cld_amt'
 !
 !-----------------------------------------------------------------------
 !***  Only one compute task prepares the new restart files.  The task
@@ -5706,7 +5671,7 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
         call check(nf90_inquire_variable(ncid_core,var_id,var_name,nctype &  !<-- Name and type of this variable
                   ,ndims,dimids,natts))                                      !<-- # of dimensions and attributes in this variable
 !
-        call check(nf90_def_var(ncid_core_new,var_name,nctype,dimids(1:ndims),var_id)) !<-- Define the variable in the new file.
+      call check(nf90_def_var(ncid_core_new,var_name,nctype,dimids(1:ndims),var_id)) !<-- Define the variable in the new file.
 !
 !-----------------------------------------------------------------------
 !***  Copy this variable's attributes to the new core file's
@@ -5769,7 +5734,7 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
       call check(nf90_close(ncid_core))
 !
 !-----------------------------------------------------------------------
-!***  Now take care of the tracer restart file.
+!***  The second file to be handled is the tracer restart file.
 !-----------------------------------------------------------------------
 !
       call check(nf90_create(filename_tracers_new                       &
@@ -5797,6 +5762,10 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
 !***  is still in define mode.  Define each of the restart file's
 !***  variables in the new file.
 !-----------------------------------------------------------------------
+!
+      call check(nf90_open(filename_tracers,nf90_nowrite,ncid_tracers))    !<-- The tracer restart file's ID
+!
+      call check(nf90_inquire(ncid_tracers,nvariables=nv_tracers))         !<-- The TOTAL number of tracer restart file variables
 !
       do n=1,nv_tracers
         var_id=n
@@ -6039,25 +6008,23 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
 !
       if(is_root_pe)then
         call check(nf90_open(filename_tracers_new,nf90_write,ncid_tracers_new))  !<-- Open the new netcdf file
-        write(0,*)' Opened tracer restart with BCs: ',trim(filename_tracers_new)
+        write(0,*)' Opened core restart with BCs: ',trim(filename_tracers_new)
       endif
 !
 !-----------------------------------------------------------------------
 !***  What is the full domain extent of this variable including 
-!***  boundary rows? 
+!***  boundary rows?
 !-----------------------------------------------------------------------
 !
-      call mpp_get_global_domain (Atm(1)%domain, isg, ieg, jsg, jeg, position=CENTER )
+      call mpp_get_global_domain (atm(1)%domain, isg, ieg, jsg, jeg, position=CENTER )
       istart_g=isg-halo
       iend_g  =ieg+halo
       jstart_g=jsg-halo
       jend_g  =jeg+halo
-!  write(0,*)' write_full istart_g=',istart_g,' iend_g=',iend_g,' jstart_g=',jstart_g,' jend_g=',jend_g
-!
-      nz=size(fields_tracers(1)%ptr,3)
 !
       count_i=iend_g-istart_g+1
       count_j=jend_g-jstart_g+1
+      nz=size(fields_tracers(1)%ptr,3)
 !
       allocate( global_field(istart_g:iend_g, jstart_g:jend_g, 1:nz) )
 !
@@ -6072,11 +6039,6 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
 !-----------------------------------------------------------------------
 !***  The following are local bounds based on the global indexing.
 !-----------------------------------------------------------------------
-!
-      lbnd_x_tracers=lbound(Atm(1)%q,1)
-      ubnd_x_tracers=ubound(Atm(1)%q,1)
-      lbnd_y_tracers=lbound(Atm(1)%q,2)
-      ubnd_y_tracers=ubound(Atm(1)%q,2)
 !
       istart=lbnd_x_tracers
       if(istart>1)then
@@ -6128,7 +6090,7 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
 !***  Loop through that file's prognostic tracers.
 !-----------------------------------------------------------------------
 !
-      vbls_tracers: do nv=1,nfields_tracers
+      vbls_tracers: do nv=1,nvars_tracers
 !
         var_name=fields_tracers(nv)%name
         if(is_root_pe)then
@@ -6136,12 +6098,13 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
         endif
 !
 !-----------------------------------------------------------------------
-!***  Gather onto a single task one layer at a time.  That task 
-!***  writes the full data to the new larger restart file.
+!***  Since we are gathering onto a single task then do so one layer 
+!***  at a time to avoid potential memory problems for large high
+!***  resolution domains.  Then that task writes the full data to the 
+!***  new file.
 !-----------------------------------------------------------------------
 !
         do k=1,nz
-!         global_field(istart_g:iend_g, jstart_g:jend_g, k) = 0.0          !<-- Set global array layer to zero.
           call mpp_gather(istart,iend,jstart,jend                                    &
                          ,pelist, fields_tracers(nv)%ptr(istart_ptr:iend_ptr,jstart_ptr:jend_ptr,k)  &
                          ,global_field(:,:,k), is_root_pe, halo, halo)
