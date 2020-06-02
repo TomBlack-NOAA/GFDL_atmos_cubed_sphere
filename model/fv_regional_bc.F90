@@ -1271,14 +1271,16 @@ contains
       enddo
 !
 !-----------------------------------------------------------------------
-!***  If the GSI will need a restart file that includes the 
-!***  fields' boundary rows then create that file and define
-!***  its dimensions and variables.
+!***  If the GSI will need restart files that includes the 
+!***  fields' boundary rows.  Those files were already created.
+!***  Prepare the objects that hold their variables' names and
+!***  values.
 !-----------------------------------------------------------------------
 !
-!     if(Atm%flagstruct%write_restart_with_bcs)then
+      if(Atm%flagstruct%write_restart_with_bcs)then
 !       call create_restart_with_bcs(Atm)
-!     endif
+        call prepare_full_fields(Atm)
+      endif
 !
 !-----------------------------------------------------------------------
 !
@@ -1383,15 +1385,16 @@ contains
       endif
 !
 !-----------------------------------------------------------------------
-!***  If the GSI will need a restart file that includes the 
+!***  If the GSI will need restart files that includes the 
 !***  fields' boundary rows after this forecast or forecast
-!***  segment completes then create that file and define
-!***  its dimensions and variables.
+!***  segment completes then prepare the objects that will
+!***  hold their variables' names and values.
 !-----------------------------------------------------------------------
 !
-!     if(Atm%flagstruct%write_restart_with_bcs)then
+      if(Atm%flagstruct%write_restart_with_bcs)then
 !       call create_restart_with_bcs(Atm)
-!     endif
+        call prepare_full_fields(Atm)
+      endif
 !
 !-----------------------------------------------------------------------
 !
@@ -2876,7 +2879,7 @@ contains
 !
       character(len=80) :: var_name                                        !<-- Variable name in the boundary NetCDF file
 !
-      logical :: call_get_var
+      logical :: call_get_var,is_root_pe
       logical :: required_local
 !
 !-----------------------------------------------------------------------
@@ -2892,6 +2895,8 @@ contains
       else
         required_local=.true.
       endif
+!
+      is_root_pe=(mpp_pe()==mpp_root_pe())
 !
 !-----------------------------------------------------------------------
 !***  Loop through the four sides of the domain.
@@ -3064,7 +3069,7 @@ contains
               call check(status)
             endif
             if (status /= nf90_noerr) then
-              if (east_bc) write(0,*)' WARNING: Tracer ',trim(var_name),' not in input file'
+              if (east_bc.and.is_root_pe) write(0,*)' WARNING: Tracer ',trim(var_name),' not in input file'
               array_4d(:,:,:,tlev)=0.                                        !<-- Tracer not in input so set to zero in boundary.
 !    
               blend_this_tracer(tlev)=.false.                                !<-- Tracer not in input so do not apply blending.
@@ -5869,15 +5874,155 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
       end subroutine create_restart_with_bcs
 !
 !-----------------------------------------------------------------------
-!--------------------------------------------------------------------------------------
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+!-----------------------------------------------------------------------
+!
+      subroutine prepare_full_fields(Atm)
+!
+!-----------------------------------------------------------------------
+!***  Prepare the objects that will hold the names and values of
+!***  the core and tracer fields to be written into the expanded
+!***  restart files that include the boundary rows so the GSI 
+!***  can update both the interior and BCs.
+!-----------------------------------------------------------------------
+!
+      integer,parameter :: ndims_core=6                                 &  !<-- # of core restart dimensions
+                          ,ndims_tracers=4                                 !<-- # of tracer restart dimensions
+!
+      type(fv_atmos_type),target,intent(inout) :: Atm                      !<-- Atm object for the current domain
+!
+      integer :: index,istat,n                                          &
+                ,ncid_core_new                                          &
+                ,ncid_tracers_new                                       &
+                ,ndims,nkount,nv_core,nv_tracers                        &
+                ,var_id
+!
+      integer,dimension(ndims_core) :: dim_lengths_core
+      integer,dimension(ndims_tracers) :: dim_lengths_tracers
+!
+      integer,dimension(1:4) :: dimids=(/0,0,0,0/)
+!
+      real,dimension(:),allocatable :: dim_values
+!
+      character(len=50) :: att_name,var_name
+!
+      character(len=9),dimension(ndims_core) :: dim_names_core=(/           &
+                                                                 'xaxis_1'  &
+                                                                ,'xaxis_2'  &
+                                                                ,'yaxis_1'  &
+                                                                ,'yaxis_2'  &
+                                                                ,'zaxis_1'  &
+                                                                ,'Time   '  &
+                                                                /)
+!
+      character(len=9),dimension(ndims_tracers) :: dim_names_tracers=(/           &
+                                                                       'xaxis_1'  &
+                                                                      ,'yaxis_1'  &
+                                                                      ,'zaxis_1'  &
+                                                                      ,'Time   '  &
+                                                                      /)
+!
+!-----------------------------------------------------------------------
+!***********************************************************************
+!-----------------------------------------------------------------------
+!
+!-----------------------------------------------------------------------
+!***  First prepare the core restart variables.
+!-----------------------------------------------------------------------
+!
+!-----------------------------------------------------------------------
+!***  All tasks are given pointers into the model data that will
+!***  be written to the new restart file.  The following are the
+!***  prognostic variables in the core rstart file.
+!-----------------------------------------------------------------------
+!
+      allocate(fields_core(1:nvars_core))
+!
+      fields_core(1)%ptr=>Atm%u
+      fields_core(1)%name='u'
+!
+      fields_core(2)%ptr=>Atm%v
+      fields_core(2)%name='v'
+!
+      fields_core(3)%ptr=>Atm%w
+      fields_core(3)%name='W'
+!
+      fields_core(4)%ptr=>Atm%delz
+      fields_core(4)%name='DZ'
+!
+      fields_core(5)%ptr=>Atm%pt
+      fields_core(5)%name='T'
+!
+      fields_core(6)%ptr=>Atm%delp
+      fields_core(6)%name='delp'
+!
+      allocate(fields_core(7)%ptr(lbound(Atm%phis,1):ubound(Atm%phis,1) &
+                            ,lbound(Atm%phis,2):ubound(Atm%phis,2)      &
+                            ,1:1))
+      fields_core(7)%ptr(:,:,1)=Atm%phis(:,:)                              !<-- For generality treat the 2-D phis as 3-D     
+      fields_core(7)%name='phis'
+!
+!-----------------------------------------------------------------------
+!***  We need to point at the tracers in the model's tracer array.
+!***  Those tracers depend on the physics that was selected so they 
+!***  cannot be pre-specified like the variables in the core restart
+!***  file were.  Read them from the expanded tracer restart file
+!***  that was created prior to the start for the forecast.
+!-----------------------------------------------------------------------
+!
+      call check(nf90_open(path=filename_tracers_new                    &  !<-- The expanded tracer restart file.
+                          ,mode=nf90_nowrite                            &  !<-- File access.
+                          ,ncid=ncid_tracers_new ))                        !<-- The expanded tracer restart file's ID
+!
+      call check(nf90_inquire(ncid      =ncid_tracers_new               &  !<-- The expanded tracer restart file's ID.
+                             ,nvariables=nv_tracers       ))               !<-- The TOTAL number of tracer restart file variables.
+!
+      nfields_tracers=nv_tracers-ndims_tracers                             !<-- # of 3-D tracer fields
+      allocate(fields_tracers(1:nfields_tracers),stat=istat)
+      if(istat/=0)then
+        call mpp_error(FATAL,' Failed to allocate fields_tracers.')
+      else
+        if(is_master())then
+          write(0,33012)nfields_tracers
+33012     format(' Allocated fields_tracers(1:',i3,')')
+        endif
+      endif
+      nkount=0
+!
+      do n=1,nv_tracers
+        var_id=n
+        call check(nf90_inquire_variable(ncid =ncid_tracers_new         &  !<-- The file's ID.
+                                        ,varid=var_id                   &  !<-- The variable's ID.
+                                        ,name =var_name ))                 !<-- The variable's name.
+!
+        if(n>ndims_tracers)then
+          nkount=nkount+1
+          fields_tracers(nkount)%name=trim(var_name)
+          index=get_tracer_index(MODEL_ATMOS, trim(var_name))
+          fields_tracers(nkount)%ptr=>Atm%q(:,:,:, index)
+        endif
+!
+      enddo
+!
+!-----------------------------------------------------------------------
+!
+      call check(nf90_close(ncid_tracers_new))
+!
+!-----------------------------------------------------------------------
+!
+      end subroutine prepare_full_fields
+!
+!-----------------------------------------------------------------------
+!+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+!-----------------------------------------------------------------------
 !
       subroutine write_full_fields(Atm)
 !
-!--------------------------------------------------------------------------------------
+!-----------------------------------------------------------------------
 !***  Write out full fields of the primary restart variables
 !***  INCLUDING BOUNDARY ROWS so the GSI can include BCs in its
 !***  update.  This is done in a restart look-alike file.
-!--------------------------------------------------------------------------------------
+!-----------------------------------------------------------------------
 !
       type(fv_atmos_type), intent(inout), target :: Atm(:)
 !
@@ -5904,7 +6049,7 @@ subroutine remap_scalar_nggps_regional_bc(Atm                         &
 !
       allocate( pelist(mpp_npes()) )
       call mpp_get_current_pelist(pelist)
-      write(0,*)' pelist=',pelist
+!     write(0,*)' pelist=',pelist
 !
       halo=nhalo_model
 !
